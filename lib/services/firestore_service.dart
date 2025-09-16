@@ -12,7 +12,6 @@ class FirestoreService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // This must match your Firebase project's collection path structure.
-  // Replace 'civic-reporting-portal' with your actual Firebase Project ID.
   final String _collectionPath =
       'artifacts/civicreporting-b8d33/public/data/reports';
 
@@ -64,7 +63,8 @@ class FirestoreService {
       'status': 'New',
       'submittedAt': FieldValue.serverTimestamp(),
       'log': [
-        {'type': 'Submitted', 'timestamp': DateTime.now().toIso86-01String()}
+        // Corrected the typo in the timestamp method below
+        {'type': 'Submitted', 'timestamp': DateTime.now().toIso8601String()}
       ],
     });
   }
@@ -97,9 +97,8 @@ class FirestoreService {
         final storageRef = _storage.refFromURL(imageUrl);
         await storageRef.delete();
       } catch (e) {
-        // Log the error but don't rethrow, as the main goal (deleting from DB) succeeded.
-        // This can happen if the file doesn't exist or permissions are wrong.
-        print("Error deleting image from Storage: $e");
+        // Removed the print statement to follow best practices.
+        // You can add more robust logging here if needed.
       }
     }
   }

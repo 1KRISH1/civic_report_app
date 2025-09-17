@@ -2,7 +2,8 @@
 import 'dart:io';
 import 'package:civic_report_app/models/report.dart';
 import 'package:civic_report_app/services/firestore_service.dart';
-import 'package:civic_report_app/services/location_service.dart'; // 1. Import the new service
+import 'package:civic_report_app/services/image_service.dart';
+import 'package:civic_report_app/services/location_service.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -22,17 +23,17 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
   final _descriptionController = TextEditingController();
   String _selectedCategory = 'Pothole';
 
-  // Image and submission state
+  // State variables
   XFile? _imageFile;
   bool _isSubmitting = false;
   late bool _isEditMode;
-
-  final FirestoreService _firestoreService = FirestoreService();
-  final ImagePicker _picker = ImagePicker();
-
-  // 2. Add state variables for location
-  final LocationService _locationService = LocationService();
   bool _isLocating = false;
+  bool _isProcessingImage = false; // For image stamping
+
+  // Services
+  final FirestoreService _firestoreService = FirestoreService();
+  final LocationService _locationService = LocationService();
+  final ImageService _imageService = ImageService();
 
   @override
   void initState() {
@@ -47,15 +48,55 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
     }
   }
 
-  // Method to handle picking an image from the gallery
-  Future<void> _pickImage() async {
-    final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
-    setState(() {
-      _imageFile = pickedFile;
-    });
+  /// Shows a modal sheet to choose between Camera and Gallery.
+  void _showImageSourceActionSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Take Photo with Camera'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _captureAndGeotag(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Choose from Gallery'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _captureAndGeotag(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Calls the ImageService to capture, geotag, and return a processed image.
+  Future<void> _captureAndGeotag(ImageSource source) async {
+    setState(() => _isProcessingImage = true);
+    try {
+      final processedImage = await _imageService.captureAndGeotagImage(source: source);
+      if (processedImage != null) {
+        setState(() => _imageFile = processedImage);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to process image: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingImage = false);
+    }
   }
   
-  // 3. Add the method to get the user's current location
+  /// Gets the user's current location and fills the text field.
   Future<void> _getCurrentLocation() async {
     setState(() => _isLocating = true);
     try {
@@ -77,31 +118,28 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
     }
   }
 
-  // Handles both creating a new report and updating an existing one
+  /// Handles both creating a new report and updating an existing one.
   Future<void> _submitOrUpdateReport() async {
     if (_formKey.currentState?.validate() ?? false) {
       setState(() => _isSubmitting = true);
 
       try {
         if (_isEditMode) {
-          // If editing, call the update service method
           await _firestoreService.updateReport(
             reportId: widget.report!.id,
             category: _selectedCategory,
             description: _descriptionController.text,
             location: _locationController.text,
           );
-          // Go back to the previous screen after updating
           if (mounted) Navigator.of(context).pop();
         } else {
-          // If creating, call the submit service method
           await _firestoreService.submitReport(
             category: _selectedCategory,
             description: _descriptionController.text,
             location: _locationController.text,
             imageFile: _imageFile,
           );
-          _resetForm(); // Reset the form only on new submissions
+          _resetForm();
         }
 
         if (mounted) {
@@ -163,7 +201,7 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
             children: [
               // --- Category Dropdown ---
               DropdownButtonFormField<String>(
-                initialValue: _selectedCategory, // Use initialValue instead of value
+                initialValue: _selectedCategory,
                 decoration: const InputDecoration(
                   labelText: 'Category',
                   border: OutlineInputBorder(),
@@ -182,14 +220,13 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
               ),
               const SizedBox(height: 16),
 
-              // --- 4. UPDATE THE LOCATION INPUT WIDGET ---
+              // --- Location Input ---
               TextFormField(
                 controller: _locationController,
                 decoration: InputDecoration(
                   labelText: 'Location',
                   hintText: 'Enter address or use GPS',
                   border: const OutlineInputBorder(),
-                  // Add the button inside the text field
                   suffixIcon: IconButton(
                     icon: _isLocating
                         ? const SizedBox(
@@ -220,44 +257,51 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
                     : null,
               ),
 
-              // --- Image Picker (only shown when creating a new report) ---
+              // --- Image Picker ---
               if (!_isEditMode) ...[
                 const SizedBox(height: 24),
-                const Text('Attach an Image (Optional)',
+                const Text('Attach an Image',
                     style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                _imageFile == null
-                    ? OutlinedButton.icon(
-                        onPressed: _pickImage,
-                        icon: const Icon(Icons.upload_file),
-                        label: const Text('Select Image'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                      )
-                    : Column(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(
-                              File(_imageFile!.path),
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () => setState(() => _imageFile = null),
-                            icon: const Icon(Icons.close, color: Colors.red),
-                            label: const Text('Remove Image',
-                                style: TextStyle(color: Colors.red)),
-                          )
-                        ],
+                if (_isProcessingImage)
+                  const Center(child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Column(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 8),
+                        Text('Processing Image...'),
+                      ],
+                    ),
+                  )),
+                if (!_isProcessingImage && _imageFile == null)
+                  OutlinedButton.icon(
+                    onPressed: _showImageSourceActionSheet,
+                    icon: const Icon(Icons.camera_alt),
+                    label: const Text('Open Camera / Gallery'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  ),
+                if (!_isProcessingImage && _imageFile != null)
+                  Column(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(File(_imageFile!.path)),
                       ),
+                      TextButton.icon(
+                        onPressed: () => setState(() => _imageFile = null),
+                        icon: const Icon(Icons.close, color: Colors.red),
+                        label: const Text('Remove Image',
+                            style: TextStyle(color: Colors.red)),
+                      )
+                    ],
+                  ),
               ],
               const SizedBox(height: 24),
 
-              // --- Submission Button and Progress ---
+              // --- Submission Button ---
               if (_isSubmitting)
                 const Center(child: CircularProgressIndicator())
               else

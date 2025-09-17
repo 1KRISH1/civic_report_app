@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'package:civic_report_app/models/report.dart';
 import 'package:civic_report_app/services/firestore_service.dart';
+import 'package:civic_report_app/services/location_service.dart'; // 1. Import the new service
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -29,6 +30,10 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   final ImagePicker _picker = ImagePicker();
 
+  // 2. Add state variables for location
+  final LocationService _locationService = LocationService();
+  bool _isLocating = false;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +53,28 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
     setState(() {
       _imageFile = pickedFile;
     });
+  }
+  
+  // 3. Add the method to get the user's current location
+  Future<void> _getCurrentLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      final address = await _locationService.getCurrentAddress();
+      _locationController.text = address;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not get location: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLocating = false);
+      }
+    }
   }
 
   // Handles both creating a new report and updating an existing one
@@ -136,7 +163,7 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
             children: [
               // --- Category Dropdown ---
               DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                initialValue: _selectedCategory, // Use initialValue instead of value
                 decoration: const InputDecoration(
                   labelText: 'Category',
                   border: OutlineInputBorder(),
@@ -155,13 +182,25 @@ class _ReportSubmissionScreenState extends State<ReportSubmissionScreen> {
               ),
               const SizedBox(height: 16),
 
-              // --- Location Input ---
+              // --- 4. UPDATE THE LOCATION INPUT WIDGET ---
               TextFormField(
                 controller: _locationController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Location',
-                  hintText: 'Enter address or cross-streets',
-                  border: OutlineInputBorder(),
+                  hintText: 'Enter address or use GPS',
+                  border: const OutlineInputBorder(),
+                  // Add the button inside the text field
+                  suffixIcon: IconButton(
+                    icon: _isLocating
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location),
+                    onPressed: _isLocating ? null : _getCurrentLocation,
+                    tooltip: 'Get Current Location',
+                  ),
                 ),
                 validator: (value) =>
                     (value?.isEmpty ?? true) ? 'Please enter a location' : null,
